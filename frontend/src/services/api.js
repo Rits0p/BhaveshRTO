@@ -1,28 +1,47 @@
 import axios from 'axios';
 
+// Auth is session-based: the backend issues a server-side 30-minute session
+// cookie (HttpOnly) and a readable `csrftoken` cookie. No JWTs are stored or
+// sent — we only forward cookies (withCredentials) and the CSRF token header.
+
+const baseURL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
+
+function getCookie(name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + escaped + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8004/api',
+  baseURL,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
 
-// Attach JWT on every request
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('rto_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  const method = (config.method || 'get').toLowerCase();
+  // CSRF is only enforced for unsafe methods (POST/PUT/PATCH/DELETE).
+  if (method !== 'get' && method !== 'head' && method !== 'options') {
+    const csrfToken = getCookie('csrftoken');
+    if (csrfToken) {
+      config.headers['X-CSRFToken'] = csrfToken;
+    }
+  }
   return config;
 });
 
-// Handle 401 globally — redirect to login
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('rto_token');
-      localStorage.removeItem('rto_admin');
+    const url = err.config?.url || '';
+    // Don't hijack the login page (bad credentials) or the session-restore
+    // call (AuthContext handles that 401 silently).
+    const isAuthCall = url.includes('/auth/login') || url.includes('/auth/me');
+    if (err.response?.status === 401 && !isAuthCall) {
       window.location.href = '/login';
     }
     return Promise.reject(err);
-  }
+  },
 );
 
 export default api;

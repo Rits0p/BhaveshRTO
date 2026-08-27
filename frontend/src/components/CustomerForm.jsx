@@ -5,8 +5,10 @@ import toast from 'react-hot-toast';
 
 const CATEGORIES = [
   { value: 'insurance', label: 'Insurance' },
+  { value: 'fitness', label: 'Fitness' },
+  { value: 'puc', label: 'PUC' },
+  { value: 'tax', label: 'Tax' },
   { value: 'permit', label: 'Permit' },
-  { value: 'fitness_puc', label: 'Fitness / PUC' },
   { value: 'license', label: 'License' },
 ];
 
@@ -37,12 +39,25 @@ export default function CustomerForm({ customer, onSuccess, onClose }) {
   const category = watch('category');
 
   const onSubmit = async (data) => {
+    // amount_paid is always derived server-side from actual Payment records —
+    // it's never accepted as writable input on the customer endpoint itself.
+    const { amount_paid, ...customerPayload } = data;
     try {
       if (isEdit) {
-        await api.put(`/customers/${customer.id}`, data);
+        await api.put(`/customers/${customer.id}`, customerPayload);
+        const newPaid = Number(amount_paid || 0);
+        if (newPaid !== Number(customer.amount_paid || 0)) {
+          // Reconcile the Payment records so paid/pending math stays accurate.
+          await api.put(`/receipts/${customer.id}/amount`, { amount_paid: newPaid });
+        }
         toast.success('Customer updated successfully!');
       } else {
-        await api.post('/customers', data);
+        const res = await api.post('/customers', customerPayload);
+        const newCustomerId = res.data?.data?.id;
+        const initialPaid = parseFloat(amount_paid);
+        if (newCustomerId && initialPaid > 0) {
+          await api.post('/payments', { customer_id: newCustomerId, amount: initialPaid });
+        }
         toast.success('Customer created successfully!');
       }
       onSuccess?.();
@@ -131,7 +146,9 @@ export default function CustomerForm({ customer, onSuccess, onClose }) {
               {errors.amount_total && <p className="form-error">{errors.amount_total.message}</p>}
             </div>
             <div className="form-group">
-              <label className="form-label">Amount Paid (₹)</label>
+              <label className="form-label">
+                Amount Paid (₹){isEdit ? ' — edits reconcile payment records' : ' (initial payment, optional)'}
+              </label>
               <input
                 type="number"
                 step="0.01"

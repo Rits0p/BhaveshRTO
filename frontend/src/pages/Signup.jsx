@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import api from '../services/api';
 import toast from 'react-hot-toast';
+import logo from '../assets/logo.png';
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -25,8 +26,8 @@ export default function Signup() {
 
   const onSubmit = async (data) => {
     try {
-      await api.post('/auth/signup', data);
-      toast.success('Account created! Please log in.');
+      await api.post('/auth/register', data);
+      toast.success('Account created! Check your inbox to verify your email before logging in.');
       navigate('/login');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Signup failed');
@@ -48,17 +49,13 @@ export default function Signup() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo">
-          <div style={{ width: 56, height: 56, background: '#1e3a5f', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
-            <svg width="28" height="28" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            </svg>
-          </div>
+          <img src={logo} alt="Bhavesh Solanki" className="auth-logo-img" />
           <h1>Bhavesh RTO CRM</h1>
           <p>Create your admin account</p>
         </div>
 
         <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: '#92400e' }}>
-          ⚠️ This is a one-time setup. Once created, this account cannot be changed or duplicated.
+          ⚠️ This is a one-time setup. Once created, this account cannot be changed or duplicated. You'll receive a verification email that must be confirmed before you can log in.
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)}>

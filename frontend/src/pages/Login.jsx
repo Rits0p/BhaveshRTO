@@ -1,27 +1,48 @@
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import toast from 'react-hot-toast';
+import logo from '../assets/logo.png';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
-  const [step, setStep] = useState('credentials'); // 'credentials' | 'otp'
-  const [adminId, setAdminId] = useState(null);
-  const [adminEmail, setAdminEmail] = useState('');
+  // 'credentials' → email+password form; 'otp' → 6-digit code sent by email.
+  const [step, setStep] = useState('credentials');
+  const [otpEmail, setOtpEmail] = useState('');
 
-  const { register: regCreds, handleSubmit: handleCreds, formState: { errors: credErrors, isSubmitting: credLoading } } = useForm();
-  const { register: regOtp, handleSubmit: handleOtp, formState: { errors: otpErrors, isSubmitting: otpLoading } } = useForm();
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm();
 
-  const onLoginSubmit = async (data) => {
+  const {
+    register: registerOtp,
+    handleSubmit: handleOtpSubmit,
+    formState: { errors: otpErrors, isSubmitting: otpSubmitting },
+  } = useForm();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
+  const onCredentialsSubmit = async (data) => {
     try {
-      const res = await api.post('/auth/login', data);
-      setAdminId(res.data.adminId);
-      setAdminEmail(data.email);
-      setStep('otp');
-      toast.success('OTP sent to your email!');
+      const res = await api.post('/auth/login', {
+        email: data.email,
+        password: data.password,
+      }, { withCredentials: true });
+
+      if (res.data.otp_required) {
+        setOtpEmail(data.email);
+        setStep('otp');
+        toast.success(res.data.message || 'Login code sent to your email.');
+      }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Login failed');
     }
@@ -29,12 +50,16 @@ export default function Login() {
 
   const onOtpSubmit = async (data) => {
     try {
-      const res = await api.post('/auth/verify-otp', { adminId, code: data.code });
-      login(res.data.admin, res.data.token);
+      const res = await api.post('/auth/login/verify-otp', {
+        email: otpEmail,
+        otp: data.otp.trim(),
+      }, { withCredentials: true });
+
+      login(res.data.user);
       toast.success('Welcome back!');
       navigate('/dashboard');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Invalid OTP');
+      toast.error(err.response?.data?.message || 'Invalid code');
     }
   };
 
@@ -42,83 +67,93 @@ export default function Login() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo">
-          <div style={{ width: 56, height: 56, background: '#1e3a5f', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
-            <svg width="28" height="28" fill="none" stroke="white" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            </svg>
-          </div>
+          <img src={logo} alt="Bhavesh Solanki" className="auth-logo-img" />
           <h1>Bhavesh RTO CRM</h1>
           <p>RTO & Insurance Advisor Portal</p>
         </div>
 
-        {step === 'credentials' ? (
-          <form onSubmit={handleCreds(onLoginSubmit)}>
+        {step === 'credentials' && (
+          <form onSubmit={handleSubmit(onCredentialsSubmit)}>
             <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 20, color: '#1e293b' }}>Sign in to your account</h2>
 
             <div className="form-group">
               <label className="form-label">Email Address</label>
               <input
                 type="email"
-                className={`form-control ${credErrors.email ? 'error' : ''}`}
+                className={`form-control ${errors.email ? 'error' : ''}`}
                 placeholder="admin@example.com"
-                {...regCreds('email', { required: 'Email is required', pattern: { value: /\S+@\S+\.\S+/, message: 'Invalid email' } })}
+                {...register('email', { required: 'Email is required', pattern: { value: /\S+@\S+\.\S+/, message: 'Invalid email' } })}
               />
-              {credErrors.email && <p className="form-error">{credErrors.email.message}</p>}
+              {errors.email && <p className="form-error">{errors.email.message}</p>}
             </div>
 
             <div className="form-group">
               <label className="form-label">Password</label>
               <input
                 type="password"
-                className={`form-control ${credErrors.password ? 'error' : ''}`}
+                className={`form-control ${errors.password ? 'error' : ''}`}
                 placeholder="••••••••"
-                {...regCreds('password', { required: 'Password is required' })}
+                {...register('password', { required: 'Password is required' })}
               />
-              {credErrors.password && <p className="form-error">{credErrors.password.message}</p>}
+              {errors.password && <p className="form-error">{errors.password.message}</p>}
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px', fontSize: 15, marginTop: 8 }} disabled={credLoading}>
-              {credLoading ? <span className="spinner" /> : 'Send OTP →'}
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px', fontSize: 15, marginTop: 8 }} disabled={isSubmitting}>
+              {isSubmitting ? <span className="spinner" /> : 'Sign In →'}
             </button>
           </form>
-        ) : (
-          <form onSubmit={handleOtp(onOtpSubmit)}>
-            <div style={{ textAlign: 'center', marginBottom: 24 }}>
-              <div style={{ width: 56, height: 56, background: '#f0f9ff', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-                <svg width="26" height="26" fill="none" stroke="#1e3a5f" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                  <polyline points="22,6 12,13 2,6" />
-                </svg>
-              </div>
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1e293b' }}>Enter your OTP</h2>
-              <p style={{ fontSize: 13, color: '#64748b', marginTop: 6 }}>
-                We sent a 6-digit code to <strong>{adminEmail}</strong>
-              </p>
-            </div>
+        )}
+
+        {step === 'otp' && (
+          <form onSubmit={handleOtpSubmit(onOtpSubmit)}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 10, color: '#1e293b' }}>Enter login code</h2>
+            <p style={{ fontSize: 13, color: '#64748b', marginBottom: 18, lineHeight: 1.5 }}>
+              We emailed a 6-digit code to <strong>{otpEmail}</strong>. It expires in 5 minutes.
+            </p>
 
             <div className="form-group">
-              <label className="form-label">6-Digit OTP Code</label>
+              <label className="form-label">6-Digit Code</label>
               <input
-                className={`form-control ${otpErrors.code ? 'error' : ''}`}
-                placeholder="123456"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
                 maxLength={6}
-                style={{ fontSize: 22, letterSpacing: 8, textAlign: 'center' }}
-                {...regOtp('code', {
-                  required: 'OTP is required',
-                  minLength: { value: 6, message: 'Must be 6 digits' },
-                  maxLength: { value: 6, message: 'Must be 6 digits' },
+                className={`form-control ${otpErrors.otp ? 'error' : ''}`}
+                placeholder="••••••"
+                style={{ textAlign: 'center', fontSize: 22, letterSpacing: 8 }}
+                {...registerOtp('otp', {
+                  required: 'Code is required',
+                  pattern: { value: /^\d{6}$/, message: 'Enter the 6-digit code' },
                 })}
               />
-              {otpErrors.code && <p className="form-error">{otpErrors.code.message}</p>}
+              {otpErrors.otp && <p className="form-error">{otpErrors.otp.message}</p>}
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px', fontSize: 15 }} disabled={otpLoading}>
-              {otpLoading ? <span className="spinner" /> : 'Verify & Login'}
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px', fontSize: 15, marginTop: 8 }} disabled={otpSubmitting}>
+              {otpSubmitting ? <span className="spinner" /> : 'Verify Code →'}
             </button>
-            <button type="button" className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setStep('credentials')}>
-              ← Back
-            </button>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 18, fontSize: 13 }}>
+              <button
+                type="button"
+                onClick={() => setStep('credentials')}
+                style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', padding: 0, fontSize: 13 }}
+              >
+                ← Use a different account
+              </button>
+              <Link to="/forgot-password" style={{ color: '#6366f1', textDecoration: 'none' }}>
+                Forgot password?
+              </Link>
+            </div>
           </form>
+        )}
+
+        {step === 'credentials' && (
+          <div style={{ textAlign: 'center', marginTop: 18, fontSize: 13 }}>
+            <Link to="/forgot-password" style={{ color: '#6366f1', textDecoration: 'none' }}>
+              Forgot password?
+            </Link>
+          </div>
         )}
       </div>
     </div>
