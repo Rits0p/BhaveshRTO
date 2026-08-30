@@ -205,6 +205,7 @@ class OpenWAProvider(WhatsAppProvider):
         self.server_url = server_url.rstrip('/')
         self.session_id = session_id
         self.api_key = api_key
+        self._cached_session_uuid = None
 
     def _clean_phone(self, phone):
         """Clean phone number into international format / OpenWA chatId.
@@ -223,24 +224,84 @@ class OpenWAProvider(WhatsAppProvider):
             headers['X-API-Key'] = self.api_key
         return headers
 
+    def _resolve_session_id(self):
+        """Resolve session name (like 'default') to its OpenWA session UUID."""
+        if self._cached_session_uuid:
+            return self._cached_session_uuid
+
+        import uuid
+        try:
+            uuid.UUID(str(self.session_id))
+            self._cached_session_uuid = self.session_id
+            return self.session_id
+        except ValueError:
+            pass
+
+        import requests
+        try:
+            res = requests.get(f'{self.server_url}/api/sessions', headers=self._get_headers(), timeout=5)
+            if res.status_code == 200:
+                sessions = res.json()
+                for s in sessions:
+                    if s.get('name') == self.session_id:
+                        self._cached_session_uuid = s.get('id')
+                        return self._cached_session_uuid
+                if sessions:
+                    self._cached_session_uuid = sessions[0].get('id')
+                    return self._cached_session_uuid
+                
+                # Auto-create if not exists
+                create_res = requests.post(
+                    f'{self.server_url}/api/sessions',
+                    json={'name': self.session_id},
+                    headers=self._get_headers(),
+                    timeout=5,
+                )
+                if create_res.status_code in (200, 201):
+                    self._cached_session_uuid = create_res.json().get('id')
+                    return self._cached_session_uuid
+        except Exception:
+            pass
+
+        return self.session_id
+
+    def _format_error(self, exc):
+        """Extract user-friendly error message from OpenWA HTTP response."""
+        import requests
+        if isinstance(exc, requests.exceptions.HTTPError) and exc.response is not None:
+            try:
+                err_data = exc.response.json()
+                msg = err_data.get('message') or err_data.get('error') or str(exc)
+                if isinstance(msg, list):
+                    msg = '; '.join(msg)
+                if 'not active' in msg.lower() or 'not started' in msg.lower() or 'qr' in msg.lower():
+                    return f"WhatsApp is not connected ({msg}). Open http://localhost:2785 and scan QR code."
+                return f"OpenWA error: {msg}"
+            except Exception:
+                pass
+        return str(exc)
+
     def send_message(self, to_number, message):
         import requests
 
+        session_id = self._resolve_session_id()
         chat_id = self._clean_phone(to_number)
-        url = f'{self.server_url}/api/sessions/{self.session_id}/messages/send-text'
+        url = f'{self.server_url}/api/sessions/{session_id}/messages/send-text'
         payload = {
             'chatId': chat_id,
             'text': message,
         }
 
         headers = self._get_headers()
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        if response.status_code == 404:
-            fallback_url = f'{self.server_url}/api/send-message'
-            response = requests.post(fallback_url, json=payload, headers=headers, timeout=15)
-
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=15)
+            if response.status_code == 404:
+                fallback_url = f'{self.server_url}/api/send-message'
+                response = requests.post(fallback_url, json=payload, headers=headers, timeout=15)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            raise RuntimeError(self._format_error(exc)) from exc
 
     def upload_media(self, file_bytes, filename, mime_type):
         """Encodes file bytes into a base64 Data URL string to pass to send_document."""
@@ -250,26 +311,30 @@ class OpenWAProvider(WhatsAppProvider):
     def send_document(self, to_number, media_id, caption, filename):
         import requests
 
+        session_id = self._resolve_session_id()
         chat_id = self._clean_phone(to_number)
-        url = f'{self.server_url}/api/sessions/{self.session_id}/messages/send-document'
+        url = f'{self.server_url}/api/sessions/{session_id}/messages/send-document'
 
         file_data = media_id if media_id.startswith('data:') else f"data:application/pdf;base64,{media_id}"
 
         payload = {
             'chatId': chat_id,
-            'file': file_data,
+            'base64': file_data,
+            'mimetype': 'application/pdf',
             'filename': filename,
             'caption': caption,
         }
 
         headers = self._get_headers()
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        if response.status_code == 404:
-            fallback_url = f'{self.server_url}/api/sessions/{self.session_id}/messages/send-file'
-            response = requests.post(fallback_url, json=payload, headers=headers, timeout=30)
-
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            if response.status_code == 404:
+                fallback_url = f'{self.server_url}/api/sessions/{session_id}/messages/send-file'
+                response = requests.post(fallback_url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            raise RuntimeError(self._format_error(exc)) from exc
 
 
 def get_whatsapp_provider():

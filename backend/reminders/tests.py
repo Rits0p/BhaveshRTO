@@ -66,7 +66,8 @@ class OpenWAProviderTestCase(TestCase):
         self.assertEqual(kwargs["json"]["chatId"], "919876543210@c.us")
         self.assertEqual(kwargs["json"]["filename"], "receipt.pdf")
         self.assertEqual(kwargs["json"]["caption"], "Your receipt")
-        self.assertTrue(kwargs["json"]["file"].startswith("data:application/pdf;base64,"))
+        self.assertEqual(kwargs["json"]["mimetype"], "application/pdf")
+        self.assertTrue(kwargs["json"]["base64"].startswith("data:application/pdf;base64,"))
 
 
 class GetWhatsAppProviderTestCase(TestCase):
