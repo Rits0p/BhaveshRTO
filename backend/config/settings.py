@@ -72,7 +72,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': env('DB_NAME', default='rto'),
         'USER': env('DB_USER', default='root'),
-        'PASSWORD': env('DB_PASSWORD', default='Admin@123'),
+        'PASSWORD': env('DB_PASSWORD', default='root'),
         'HOST': env('DB_HOST', default='localhost'),
         'PORT': env('DB_PORT', default='3306'),
         'OPTIONS': {'charset': 'utf8mb4'},
@@ -138,6 +138,13 @@ FRONTEND_URL = env('FRONTEND_URL', default=env('FRONTEND_ORIGIN', default='http:
 # ─── Email delivery ───────────────────────────────────────────────────────
 # Defaults to the console backend so the app works out of the box. Set
 # EMAIL_HOST_USER / EMAIL_HOST_PASSWORD in .env to send real emails.
+#
+# Gmail notes: 2FA is required. Use an App Password
+# (Google Account -> Security -> 2-Step Verification -> App passwords) as
+# EMAIL_HOST_PASSWORD — the normal account password is rejected by Google.
+# Gmail also only accepts connections from IPs it recognises; if you see
+# "Username and Password not accepted" on an otherwise correct password, log
+# into the account in a normal browser once and re-authorise the app.
 EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
 
@@ -145,21 +152,32 @@ _explicit_backend = env('EMAIL_BACKEND', default='')
 if _explicit_backend:
     EMAIL_BACKEND = _explicit_backend
 elif EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
-    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    # Use IPv4-only backend to avoid wsarecv timeouts when smtp.gmail.com
+    # resolves to an IPv6 address that the local network cannot reach.
+    EMAIL_BACKEND = 'common.email_backend.IPv4EmailBackend'
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 EMAIL_HOST = env('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = env.int('EMAIL_PORT', default=587)
-EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
+# Port 465 is implicit TLS (SMTPS) and must be used *instead of* USE_TLS, not
+# alongside it — passing both makes Python's smtplib raise
+# "unexpected message" while the server waits for a STARTTLS reply.
+EMAIL_USE_SSL = env.bool('EMAIL_USE_SSL', default=False)
+EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=EMAIL_PORT != 465 and not EMAIL_USE_SSL)
+# Without a timeout a dead SMTP host hangs the request until the OS TCP timeout
+# (minutes on Windows), which the frontend would report as a plain "Login failed".
+EMAIL_TIMEOUT = env.int('EMAIL_TIMEOUT', default=15)
 DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER or 'no-reply@bhaveshrto.local')
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+EMAIL_SUBJECT_PREFIX = env('EMAIL_SUBJECT_PREFIX', default='[Bhavesh RTO] ')
 
 # ─── WhatsApp (Meta Cloud API & OpenWA Integration) ─────────────────────────
 WHATSAPP_PROVIDER = env('WHATSAPP_PROVIDER', default='auto')  # 'auto', 'openwa', 'meta', 'stub'
 WHATSAPP_API_TOKEN = env('WHATSAPP_API_TOKEN', default='')
 WHATSAPP_PHONE_NUMBER_ID = env('WHATSAPP_PHONE_NUMBER_ID', default='')
 
-OPENWA_SERVER_URL = env('OPENWA_SERVER_URL', default='http://localhost:2785')
+OPENWA_SERVER_URL = env('OPENWA_BASE_URL', default=env('OPENWA_SERVER_URL', default='http://localhost:2785'))
 OPENWA_SESSION_ID = env('OPENWA_SESSION_ID', default='default')
 OPENWA_API_KEY = env('OPENWA_API_KEY', default='')
 
